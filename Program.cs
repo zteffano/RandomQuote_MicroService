@@ -1,20 +1,57 @@
 
+using Microsoft.EntityFrameworkCore;
+using QuoteOTD___Service.Context;
+using QuoteOTD___Service.Model;
+
 namespace QuoteOTD___Service
 {
     public class Program
     {
         public static void Main(string[] args)
         {
+            
+
             var builder = WebApplication.CreateBuilder(args);
+
+            string connectionString = builder.Configuration.GetConnectionString("Docker");
 
             // Add services to the container.
             builder.Services.AddAuthorization();
 
+
             // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen();
+            builder.Services.AddDbContext<QuoteContext>(options =>
+            {
+                options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
+            });
+            // Tilpas Kestrel til kun at bruge HTTP, når den kører i Docker
+            builder.WebHost.ConfigureKestrel(serverOptions =>
+            {
+                serverOptions.ListenAnyIP(8080); // Match den port, der er angivet i ASPNETCORE_HTTP_PORTS
+            });
 
             var app = builder.Build();
+
+            // Migrationer her
+            using (var scope = app.Services.CreateScope())
+            {
+                var services = scope.ServiceProvider;
+                try
+                {
+                    var context = services.GetRequiredService<QuoteContext>();
+                    context.Database.Migrate(); // Udfører pending migrationer
+
+                    // Seed database efter migrations
+                    SeedDatabase(context);
+                }
+                catch (Exception ex)
+                {
+                    var logger = services.GetRequiredService<ILogger<Program>>();
+                    logger.LogError(ex, "An error occurred while migrating the database.");
+                }
+            }
 
             // Configure the HTTP request pipeline.
             if (app.Environment.IsDevelopment())
@@ -23,40 +60,50 @@ namespace QuoteOTD___Service
                 app.UseSwaggerUI();
             }
 
-            app.UseHttpsRedirection();
+            //app.UseHttpsRedirection();
 
             app.UseAuthorization();
 
-            var quotes = new[]
+            // Pick random quote
+            app.MapGet("/quote", async (QuoteContext context) =>
             {
-                new { Author = "Steve Jobs", Text = "The only way to do great work is to love what you do." },
-                new { Author = "Mark Twain", Text = "The secret of getting ahead is getting started." },
-                new { Author = "Michael Jordan", Text = "I’ve missed more than 9000 shots in my career. I’ve lost almost 300 games. 26 times I’ve been trusted to take the game-winning shot and missed. I’ve failed over and over and over again in my life. And that is why I succeed." },
-                new { Author = "Vince Lombardi", Text = "It’s not whether you get knocked down; it’s whether you get up." },
-                new { Author = "Unknown", Text = "Your limitation—it’s only your imagination." },
-                new { Author = "Unknown", Text = "Push yourself, because no one else is going to do it for you." },
-                new { Author = "Unknown", Text = "Great things never come from comfort zones." },
-                new { Author = "Unknown", Text = "Dream it. Wish it. Do it." },
-                new { Author = "Unknown", Text = "Success doesn’t just find you. You have to go out and get it." },
-                new { Author = "Unknown", Text = "The harder you work for something, the greater you’ll feel when you achieve it." },
-                new { Author = "Unknown", Text = "Dream bigger. Do bigger." },
-                new { Author = "Unknown", Text = "Don’t stop when you’re tired. Stop when you’re done." },
-                new { Author = "Unknown", Text = "Wake up with determination. Go to bed with satisfaction." },
-                new { Author = "Unknown", Text = "Do something today that your future self will thank you for." },
-                new { Author = "Unknown", Text = "Little things make big days." }
-            };
-
-            app.MapGet("/quote", () =>
-            {
-                //Get quote
-                var quote = quotes[new Random().Next(quotes.Length)];
+                var quotes = await context.Quotes.ToListAsync();
+                var random = new Random();
+                var quote = quotes[random.Next(quotes.Count)];
                 return Results.Ok(quote);
 
             })
-            .WithName("GetQuote")
+            .WithName("GetRandomQuote")
             .WithOpenApi();
 
             app.Run();
+
+            // Metode til at seede databasen
+            void SeedDatabase(QuoteContext context)
+            {
+                // Kontroller om databasen allerede er seedet
+                if (!context.Quotes.Any())
+                {
+                    var quotes = new List<Quote>
+        {
+            new Quote { Author = "Albert Einstein", Text = "Life is like riding a bicycle. To keep your balance, you must keep moving." },
+            new Quote { Author = "Maya Angelou", Text = "You will face many defeats in life, but never let yourself be defeated." },
+            new Quote { Author = "Winston Churchill", Text = "Success is not final, failure is not fatal: It is the courage to continue that counts." },
+            new Quote { Author = "Confucius", Text = "It does not matter how slowly you go as long as you do not stop." },
+            new Quote { Author = "Oscar Wilde", Text = "Be yourself; everyone else is already taken." },
+            new Quote { Author = "Nelson Mandela", Text = "The greatest glory in living lies not in never falling, but in rising every time we fall." },
+            new Quote { Author = "Steve Jobs", Text = "Your work is going to fill a large part of your life, and the only way to be truly satisfied is to do what you believe is great work. And the only way to do great work is to love what you do." },
+            new Quote { Author = "Ralph Waldo Emerson", Text = "Do not go where the path may lead, go instead where there is no path and leave a trail." },
+            new Quote { Author = "Theodore Roosevelt", Text = "Believe you can and you're halfway there." },
+            new Quote { Author = "Helen Keller", Text = "The best and most beautiful things in the world cannot be seen or even touched - they must be felt with the heart." }
+        };
+
+                    context.Quotes.AddRange(quotes);
+                    context.SaveChanges();
+                }
+            }
         }
+
+
     }
 }
